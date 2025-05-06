@@ -1,8 +1,9 @@
+import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 import time
-import os       
+import os     
 
 # Configuração inicial do Selenium
 chromedriver_path = './chromedriver.exe'
@@ -15,6 +16,9 @@ print("Por favor, escaneie o QR Code para entrar no WhatsApp Web.")
 while len(driver.find_elements(By.ID, 'side')) < 1:
     time.sleep(1)
 time.sleep(2)
+
+
+
 
 # Funções para envio de mensagens
 def enviar_mensagem_com_texto_e_anexo(numero, mensagem, arquivo):
