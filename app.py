@@ -9,6 +9,8 @@ import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
 import os
 import webbrowser
@@ -192,14 +194,45 @@ class SenderThread(QThread):
                     time.sleep(1)
                 time.sleep(2)
 
-                # Clica no botão de enviar mensagem
-                botao_enviar_mensagem = self.driver.find_element(By.XPATH, "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div[2]/button/span")
+                # Tentar localizar o botão de enviar mensagem usando o XPath novo e, se falhar, o antigo
+                botao_enviar_mensagem = None
+                wait = WebDriverWait(self.driver, 10)  # Espera até 10 segundos
+                xpath_novo = "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div/div[4]/button/span"
+                xpath_antigo = "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div[2]/button/span"
+
+                try:
+                    # Tentar o XPath novo primeiro
+                    botao_enviar_mensagem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_novo)))
+                except:
+                    try:
+                        # Se o XPath novo falhar, tentar o XPath antigo
+                        botao_enviar_mensagem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_antigo)))
+                    except:
+                        return "Erro: Não foi possível localizar o botão de enviar mensagem."
+
+                # Clicar no botão de enviar mensagem
                 botao_enviar_mensagem.click()
+                print(f"Mensagem enviada para {numero}: {mensagem}")
                 time.sleep(self.delay)
                 return "Enviado (texto)"
 
             # Se houver arquivo, carregar a legenda (se fornecida) via URL e enviar o anexo
             if arquivo:
+                # Verificar o tipo de arquivo (baseado na extensão)
+                extensao = os.path.splitext(arquivo)[1].lower()
+                extensoes_imagens_videos = {'.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi', '.mkv'}
+                extensoes_documentos = {'.pdf', '.doc', '.docx', '.txt', '.xls', '.xlsx', '.ppt', '.pptx'}
+
+                # Determinar o input correto com base na extensão do arquivo
+                if extensao in extensoes_imagens_videos:
+                    input_xpath = '//*[@id="app"]/div/span[6]/div/ul/div/div/div[2]/li/div/input'  # Input de Fotos e Vídeos
+                    tipo_arquivo = "Imagem/Vídeo"
+                elif extensao in extensoes_documentos:
+                    input_xpath = '//*[@id="app"]/div/span[6]/div/ul/div/div/div[1]/li/div/input'  # Input de Documentos
+                    tipo_arquivo = "Documento"
+                else:
+                    return f"Erro: Arquivo {os.path.basename(arquivo)} não é compatível. Use imagens/vídeos ({', '.join(extensoes_imagens_videos)}) ou documentos ({', '.join(extensoes_documentos)})."
+
                 # Carregar a legenda via URL, se houver
                 if legenda:
                     legenda_encoded = legenda.replace("\n", "%0A")  # Codifica quebras de linha
@@ -212,21 +245,22 @@ class SenderThread(QThread):
                     time.sleep(1)
                 time.sleep(2)
 
-                # Clica no botão de anexar
-                botao_anexar = self.driver.find_element(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span/div/div[1]/div/button/span')
+                # Clicar no botão de anexar ('+')
+                wait = WebDriverWait(self.driver, 10)
+                botao_anexar = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/button/span')))
                 botao_anexar.click()
                 time.sleep(1)
 
-                # Faz o upload do arquivo
-                campo_upload = self.driver.find_element(By.XPATH, '//*[@id="app"]/div/span[5]/div/ul/div/div/div[2]/li/div/input')
+                # Fazer o upload do arquivo pelo input correto
+                campo_upload = wait.until(EC.presence_of_element_located((By.XPATH, input_xpath)))
                 campo_upload.send_keys(arquivo)
                 time.sleep(3)
 
-                # Clica no botão de enviar (o WhatsApp usará o texto carregado via URL como legenda)
-                botao_enviar = self.driver.find_element(By.XPATH, '//*[@id="app"]/div/div[3]/div/div[2]/div[2]/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span')
+                # Clicar no botão de enviar (o WhatsApp usará o texto carregado via URL como legenda)
+                botao_enviar = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app"]/div/div[3]/div/div[2]/div[2]/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span')))
                 botao_enviar.click()
                 time.sleep(self.delay)
-                return "Enviado (com anexo)" + (f" com legenda" if legenda else "")
+                return f"Enviado ({tipo_arquivo.lower()})" + (f" com legenda" if legenda else "")
 
         except Exception as e:
             return f"Erro: {str(e)}"
@@ -306,7 +340,7 @@ class MainWindow(QMainWindow):
 
         self.botao_nome_legenda = QPushButton("Nome")
         self.botao_nome_legenda.clicked.connect(self.inserir_marcador_nome_legenda)
-        self.botao_anexar = QPushButton("Anexar Arquivos & Imagens")
+        self.botao_anexar = QPushButton("Anexar Arquivos/Imagens")
         self.botao_anexar.clicked.connect(self.anexar_arquivo)
         self.botao_limpar_anexos = QPushButton("Limpar")
         self.botao_limpar_anexos.clicked.connect(self.limpar_anexos)
@@ -493,7 +527,12 @@ class MainWindow(QMainWindow):
         webbrowser.open("https://emojipedia.org/")
 
     def anexar_arquivo(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar arquivo", "", "Todos os arquivos (*.*)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Selecionar arquivo", 
+            "", 
+            "Imagens/Vídeos/Documentos (*.jpg *.jpeg *.png *.gif *.mp4 *.mov *.avi *.mkv*.pdf *.doc *.docx *.txt *.xls *.xlsx *.ppt *.pptx)"
+        )
         if file_path:
             row_position = self.tabela_anexos.rowCount()
             self.tabela_anexos.insertRow(row_position)
@@ -551,7 +590,17 @@ class MainWindow(QMainWindow):
             service = Service(chromedriver_path)
             self.driver = webdriver.Chrome(service=service)
             self.driver.get("https://web.whatsapp.com/")
-            QMessageBox.information(self, "Instrução", "Escaneie o QR Code para entrar no WhatsApp Web e clique em OK.")
+            wait = WebDriverWait(self.driver, 20)  # Aumentar o tempo de espera para lidar com o comunicado
+
+            # Tentar clicar no botão "Continuar" do comunicado, se presente
+            try:
+                botao_continuar = wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@id="'app'"]/div/span[2]/div/div/div/div/div/div/div[2]/div/button/div/div")))
+                botao_continuar.click()
+                time.sleep(2)  # Esperar após clicar para garantir que a página carregue
+            except:
+                pass  # Ignorar se o botão não estiver presente (caso o comunicado já tenha sido fechado)
+
+            # Aguardar a página principal carregar
             while len(self.driver.find_elements(By.ID, 'side')) < 1:
                 time.sleep(1)
             time.sleep(2)

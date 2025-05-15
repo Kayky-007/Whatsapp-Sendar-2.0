@@ -44,12 +44,12 @@ def enviar_mensagem_por_numero(numero, mensagem, arquivo=None, legenda=None):
 
         if arquivo:
             # Clica no botão de anexar
-            botao_anexar = driver.find_element(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span/div/div[1]/div/button/span')
+            botao_anexar = driver.find_element(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/button/span') # antigo //*[@id="main"]/footer/div[1]/div/span/div/div[1]/div/button/span
             botao_anexar.click()
             time.sleep(1)
 
             # Faz o upload do arquivo
-            campo_upload = driver.find_element(By.XPATH, '//*[@id="app"]/div/span[5]/div/ul/div/div/div[2]/li/div/input')
+            campo_upload = driver.find_element(By.XPATH, '') #antigo //*[@id="app"]/div/span[5]/div/ul/div/div/div[2]/li/div/input
             campo_upload.send_keys(arquivo)
             time.sleep(3)
 
@@ -67,7 +67,7 @@ def enviar_mensagem_por_numero(numero, mensagem, arquivo=None, legenda=None):
         
         elif mensagem:
             # Clica no botão de enviar mensagem
-            botao_enviar_mensagem = driver.find_element(By.XPATH, "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div[2]/button/span")
+            botao_enviar_mensagem = driver.find_element(By.XPATH, "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div/div[4]/button/span") #//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div[2]/button/span xpath versão antiga
             botao_enviar_mensagem.click()
             print(f"Mensagem enviada para {numero}: {mensagem}")
 
