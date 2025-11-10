@@ -1,3 +1,4 @@
+# app.py
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QFileDialog, QMessageBox,
@@ -8,6 +9,7 @@ import sys
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -16,656 +18,462 @@ import os
 import webbrowser
 import threading
 
+# ============================= DIALOGS =============================
 class ConfigDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Configurações")
         self.setGeometry(200, 200, 300, 150)
-
         layout = QFormLayout()
-        self.delay_input = QLineEdit("2")  # Delay padrão: 2 segundos
-        layout.addRow("Delay entre mensagens (segundos):", self.delay_input)
-        
-        self.ok_button = QPushButton("OK")
-        self.ok_button.clicked.connect(self.accept)
-        layout.addWidget(self.ok_button)
-
+        self.delay_input = QLineEdit("2")
+        layout.addRow("Delay (segundos):", self.delay_input)
+        ok = QPushButton("OK")
+        ok.clicked.connect(self.accept)
+        layout.addWidget(ok)
         self.setLayout(layout)
-
     def get_delay(self):
-        return float(self.delay_input.text())
+        try: return float(self.delay_input.text())
+        except: return 2
 
 class AddContactDialog(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Adicionar Contato Manualmente")
+        self.setWindowTitle("Adicionar Contato")
         self.setGeometry(200, 200, 300, 200)
-
         layout = QFormLayout()
-        self.nome_input = QLineEdit()
-        self.numero_input = QLineEdit()
-        self.numero_input.setPlaceholderText("+55DDDnúmero")
-        layout.addRow("Nome:", self.nome_input)
-        layout.addRow("Número:", self.numero_input)
-
-        self.ok_button = QPushButton("Adicionar")
-        self.ok_button.clicked.connect(self.accept)
-        layout.addWidget(self.ok_button)
-
+        self.nome = QLineEdit()
+        self.numero = QLineEdit()
+        self.numero.setPlaceholderText("+55DDDnúmero")
+        layout.addRow("Nome:", self.nome)
+        layout.addRow("Número:", self.numero)
+        ok = QPushButton("Adicionar")
+        ok.clicked.connect(self.accept)
+        layout.addWidget(ok)
         self.setLayout(layout)
-
     def get_contact(self):
-        return self.nome_input.text(), self.numero_input.text()
+        return self.nome.text(), self.numero.text()
 
 class ImportExcelDialog(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Importar Contatos do Excel")
+        self.setWindowTitle("Importar Excel")
         self.setGeometry(200, 200, 400, 200)
-
         layout = QFormLayout()
-        
-        # Campo para selecionar o arquivo Excel
-        self.file_path_input = QLineEdit()
-        self.file_path_input.setPlaceholderText("Selecione o arquivo .xlsx")
-        self.file_path_input.setReadOnly(True)
-        self.file_select_button = QPushButton("Selecionar Arquivo")
-        self.file_select_button.clicked.connect(self.select_file)
+        self.file = QLineEdit()
+        self.file.setReadOnly(True)
+        btn_file = QPushButton("Selecionar")
+        btn_file.clicked.connect(self.selecionar)
         file_layout = QHBoxLayout()
-        file_layout.addWidget(self.file_path_input)
-        file_layout.addWidget(self.file_select_button)
-        layout.addRow("Arquivo Excel:", file_layout)
-
-        # Campo para o nome da coluna de nomes (opcional)
-        self.nome_coluna_input = QLineEdit()
-        self.nome_coluna_input.setPlaceholderText("Ex.: Nome (opcional)")
-        layout.addRow("Coluna com Nomes:", self.nome_coluna_input)
-
-        # Campo para o nome da coluna de números
-        self.numero_coluna_input = QLineEdit()
-        self.numero_coluna_input.setPlaceholderText("Ex.: Número")
-        layout.addRow("Coluna com Números:", self.numero_coluna_input)
-
-        # Botão de confirmação
-        self.ok_button = QPushButton("Importar")
-        self.ok_button.clicked.connect(self.accept)
-        layout.addWidget(self.ok_button)
-
+        file_layout.addWidget(self.file)
+        file_layout.addWidget(btn_file)
+        layout.addRow("Arquivo:", file_layout)
+        self.col_nome = QLineEdit()
+        self.col_num = QLineEdit()
+        layout.addRow("Coluna Nome:", self.col_nome)
+        layout.addRow("Coluna Número:", self.col_num)
+        ok = QPushButton("Importar")
+        ok.clicked.connect(self.accept)
+        layout.addWidget(ok)
         self.setLayout(layout)
-
-    def select_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar arquivo Excel", "", "Arquivos Excel (*.xlsx)")
-        if file_path:
-            self.file_path_input.setText(file_path)
-
+    def selecionar(self):
+        path, _ = QFileDialog.getOpenFileName(self, "", "", "Excel (*.xlsx)")
+        if path: self.file.setText(path)
     def get_excel_info(self):
-        return (
-            self.file_path_input.text(),
-            self.nome_coluna_input.text(),
-            self.numero_coluna_input.text()
-        )
+        return self.file.text(), self.col_nome.text(), self.col_num.text()
 
+# ============================= THREAD =============================
 class SenderThread(QThread):
-    update_status = Signal(int, str)  # Sinal para atualizar o status na tabela de contatos
-    add_log = Signal(str, str)  # Sinal para adicionar um registro na tabela de registros
-    finished = Signal()  # Sinal para indicar que o envio terminou
-    update_pause_button = Signal(bool)  # Sinal para atualizar o texto do botão "Pausar"
+    update_status = Signal(int, str)
+    add_log = Signal(str, str)
+    finished = Signal()
+    update_pause = Signal(bool)
 
-    def __init__(self, driver, mensagem, anexos, tabela, tabela_anexos, delay, parent=None):
-        super().__init__(parent)
+    def __init__(self, driver, msg, anexos, tabela, tabela_anexos, delay):
+        super().__init__()
         self.driver = driver
-        self.mensagem = mensagem
+        self.msg = msg
         self.anexos = anexos
         self.tabela = tabela
         self.tabela_anexos = tabela_anexos
         self.delay = delay
         self.pausado = False
         self.parar = False
-        self.lock = threading.Lock()  # Lock para sincronizar acesso às variáveis pausado/parar
+        self.lock = threading.Lock()
 
     def run(self):
         for row in range(self.tabela.rowCount()):
             with self.lock:
-                if self.parar:
-                    break
+                if self.parar: break
 
             while True:
                 with self.lock:
-                    if not self.pausado:
-                        break
-                    if self.parar:
-                        break
+                    if not self.pausado or self.parar: break
                 time.sleep(0.1)
 
-            # Obter o número e o nome do contato
             numero = self.tabela.item(row, 1).text()
-            nome_item = self.tabela.item(row, 0)
-            nome = nome_item.text() if nome_item and nome_item.text() else ""  # String vazia se nome estiver vazio
+            nome = self.tabela.item(row, 0).text() if self.tabela.item(row, 0) else ""
             status = ""
 
-            # Passo 1: Enviar mensagem solta, se houver
-            if self.mensagem:
-                mensagem_personalizada = self.mensagem.replace("{nome}", nome)
-                status = self.enviar_mensagem_por_numero(numero, mensagem=mensagem_personalizada)
+            if self.msg:
+                msg_p = self.msg.replace("{nome}", nome)
+                s = self.enviar(numero, mensagem=msg_p)
+                status += s
 
-            # Passo 2: Para cada anexo, carregar a legenda (se houver) e enviar o anexo
             if self.anexos:
-                for i, arquivo in enumerate(self.anexos):
+                for i, arq in enumerate(self.anexos):
                     with self.lock:
-                        if self.parar:
-                            break
-
+                        if self.parar: break
                     while True:
                         with self.lock:
-                            if not self.pausado:
-                                break
-                            if self.parar:
-                                break
+                            if not self.pausado or self.parar: break
                         time.sleep(0.1)
+                    legenda = ""
+                    item = self.tabela_anexos.item(i, 2)
+                    if item: legenda = item.text().replace("{nome}", nome)
+                    s = self.enviar(numero, arquivo=arq, legenda=legenda)
+                    status += (", " if status else "") + s
 
-                    # Obter a legenda e substituir o marcador {nome}
-                    legenda_item = self.tabela_anexos.item(i, 2)
-                    legenda = legenda_item.text() if legenda_item and legenda_item.text() else None
-                    if legenda:
-                        legenda_personalizada = legenda.replace("{nome}", nome)
-                    else:
-                        legenda_personalizada = None
-
-                    # Enviar o anexo com a legenda carregada via URL
-                    anexo_status = self.enviar_mensagem_por_numero(numero, arquivo=arquivo, legenda=legenda_personalizada)
-                    status = f"{status}, {anexo_status}" if status else anexo_status
-
-            self.update_status.emit(row, status)
-            self.add_log.emit(numero, status)
+            self.update_status.emit(row, status.strip())
+            self.add_log.emit(numero, status.strip())
 
         self.finished.emit()
 
-    def enviar_mensagem_por_numero(self, numero, mensagem=None, arquivo=None, legenda=None):
+    def enviar(self, numero, mensagem=None, arquivo=None, legenda=None):
         try:
-            # Formatar número (remover caracteres indesejados, exceto o +)
             numero = numero.replace(" ", "").replace("-", "")
-            
-            # Se houver mensagem solta, enviar como texto
-            if mensagem:
-                mensagem_encoded = mensagem.replace("\n", "%0A")  # Codifica quebras de linha
-                url = f"https://web.whatsapp.com/send?phone={numero}&text={mensagem_encoded}"
+            wait = WebDriverWait(self.driver, 15)
+
+            if mensagem and not arquivo:
+                url = f"https://web.whatsapp.com/send?phone={numero}&text={mensagem.replace(chr(10), '%0A')}"
                 self.driver.get(url)
-                while len(self.driver.find_elements(By.ID, 'side')) < 1:
-                    time.sleep(1)
-                time.sleep(2)
-
-                # Tentar localizar o botão de enviar mensagem usando o XPath novo e, se falhar, o antigo
-                botao_enviar_mensagem = None
-                wait = WebDriverWait(self.driver, 10)  # Espera até 10 segundos
-                xpath_novo = "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div/div[4]/button/span"
-                xpath_antigo = "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div[2]/button/span"
-
-                try:
-                    # Tentar o XPath novo primeiro
-                    botao_enviar_mensagem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_novo)))
-                except:
-                    try:
-                        # Se o XPath novo falhar, tentar o XPath antigo
-                        botao_enviar_mensagem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_antigo)))
-                    except:
-                        return "Erro: Não foi possível localizar o botão de enviar mensagem."
-
-                # Clicar no botão de enviar mensagem
-                botao_enviar_mensagem.click()
-                print(f"Mensagem enviada para {numero}: {mensagem}")
-                time.sleep(self.delay)
-                return "Enviado (texto)"
-
-            # Se houver arquivo, carregar a legenda (se fornecida) via URL e enviar o anexo
-            if arquivo:
-                # Verificar o tipo de arquivo (baseado na extensão)
-                extensao = os.path.splitext(arquivo)[1].lower()
-                extensoes_imagens_videos = {'.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi', '.mkv'}
-                extensoes_documentos = {'.pdf', '.doc', '.docx', '.txt', '.xls', '.xlsx', '.ppt', '.pptx'}
-
-                # Determinar o input correto com base na extensão do arquivo
-                if extensao in extensoes_imagens_videos:
-                    input_xpath = '//*[@id="app"]/div/span[6]/div/ul/div/div/div[2]/li/div/input'  # Input de Fotos e Vídeos
-                    tipo_arquivo = "Imagem/Vídeo"
-                elif extensao in extensoes_documentos:
-                    input_xpath = '//*[@id="app"]/div/span[6]/div/ul/div/div/div[1]/li/div/input'  # Input de Documentos
-                    tipo_arquivo = "Documento"
-                else:
-                    return f"Erro: Arquivo {os.path.basename(arquivo)} não é compatível. Use imagens/vídeos ({', '.join(extensoes_imagens_videos)}) ou documentos ({', '.join(extensoes_documentos)})."
-
-                # Carregar a legenda via URL, se houver
-                if legenda:
-                    legenda_encoded = legenda.replace("\n", "%0A")  # Codifica quebras de linha
-                    url = f"https://web.whatsapp.com/send?phone={numero}&text={legenda_encoded}"
-                else:
-                    url = f"https://web.whatsapp.com/send?phone={numero}"
-                
-                self.driver.get(url)
-                while len(self.driver.find_elements(By.ID, 'side')) < 1:
-                    time.sleep(1)
-                time.sleep(2)
-
-                # Clicar no botão de anexar ('+')
-                wait = WebDriverWait(self.driver, 10)
-                botao_anexar = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/button/span')))
-                botao_anexar.click()
-                time.sleep(1)
-
-                # Fazer o upload do arquivo pelo input correto
-                campo_upload = wait.until(EC.presence_of_element_located((By.XPATH, input_xpath)))
-                campo_upload.send_keys(arquivo)
+                wait.until(EC.presence_of_element_located((By.ID, "main")))
                 time.sleep(3)
 
-                # Clicar no botão de enviar (o WhatsApp usará o texto carregado via URL como legenda)
-                botao_enviar = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app"]/div/div[3]/div/div[2]/div[2]/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span')))
-                botao_enviar.click()
+                xpath = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[4]/div/span/div/div/div[1]/div[1]/span'
+                btn = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
+                btn.click()
+                print(f"[OK] Texto: {numero}")
                 time.sleep(self.delay)
-                return f"Enviado ({tipo_arquivo.lower()})" + (f" com legenda" if legenda else "")
+                return "Texto OK"
+
+            if arquivo:
+                url = f"https://web.whatsapp.com/send?phone={numero}"
+                if legenda:
+                    url += f"&text={legenda.replace(chr(10), '%0A')}"
+                self.driver.get(url)
+                wait.until(EC.presence_of_element_located((By.ID, "main")))
+                time.sleep(3)
+
+                # === BOTÃO "+" ===
+                xpath_plus = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/div/span/div/div/div[1]/div[1]/span'
+                btn_plus = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_plus)))
+                btn_plus.click()
+                time.sleep(1)
+
+                # === INPUT DO ARQUIVO ===
+                ext = os.path.splitext(arquivo)[1].lower()
+                input_xpath = (
+                    '//*[@id="app"]/div[1]/div/span[6]/div/ul/div/div/div[2]/li/div/input'
+                    if ext in {'.jpg','.jpeg','.png','.gif','.mp4','.mov'}
+                    else '//*[@id="app"]/div[1]/div/span[6]/div/ul/div/div/div[1]/li/div/input'
+                )
+                campo = wait.until(EC.presence_of_element_located((By.XPATH, input_xpath)))
+                campo.send_keys(arquivo)
+                time.sleep(3)
+
+                # === BOTÃO ENVIAR DO POP-UP (SEU XPATH NOVO) ===
+                xpath_send_anexo = '//*[@id="app"]/div[1]/div/div[3]/div/div[3]/div[2]/div/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span'
+                btn_send_anexo = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_send_anexo)))
+                btn_send_anexo.click()
+                time.sleep(self.delay)
+                print(f"[OK] Anexo enviado com legenda: {numero}")
+                return "Arquivo OK"
 
         except Exception as e:
-            return f"Erro: {str(e)}"
+            print(f"[ERRO] {numero}: {e}")
+            return f"Erro"
 
     def pausar(self):
         with self.lock:
             self.pausado = not self.pausado
-            self.update_pause_button.emit(self.pausado)
+            self.update_pause.emit(self.pausado)
 
     def parar(self):
         with self.lock:
             self.parar = True
             self.pausado = False
-            self.update_pause_button.emit(False)
+            self.update_pause.emit(False)
 
+# ============================= MAIN WINDOW =============================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("WhatsApp Sender")
-        self.setGeometry(100, 100, 1200, 600)
+        self.setWindowTitle("WhatsApp Sender - KAYKY EDITION")
+        self.setGeometry(100, 100, 1300, 700)
 
-        # Seção Esquerda: Tabela de contatos
-        self.tabela = QTableWidget()
-        self.tabela.setRowCount(0)
-        self.tabela.setColumnCount(3)
+        # === TABELA CONTATOS ===
+        self.tabela = QTableWidget(0, 3)
         self.tabela.setHorizontalHeaderLabels(["Nome", "Número", "Status"])
-        self.tabela.setMinimumWidth(300)
+        self.tabela.setMinimumWidth(350)
 
-        self.botao_importar_excel = QPushButton("Importar Excel")
-        self.botao_importar_excel.clicked.connect(self.importar_excel)
-        self.botao_importar = QPushButton("Importar Números")
-        self.botao_importar.clicked.connect(self.importar_contatos)
-        self.botao_adicionar_manual = QPushButton("Adicionar Manualmente")
-        self.botao_adicionar_manual.clicked.connect(self.adicionar_manual)
-        self.botao_limpar = QPushButton("Limpar")
-        self.botao_limpar.clicked.connect(self.limpar_tabela)
-        self.botao_apagar = QPushButton("Apagar")
-        self.botao_apagar.clicked.connect(self.apagar_linha)
+        btns = QHBoxLayout()
+        btns.addWidget(self.btn("Importar Excel", self.importar_excel, "#0a7641"))
+        btns.addWidget(self.btn("Importar CSV", self.importar_txt, "#182b5f"))
+        btns.addWidget(self.btn("Adicionar Manual", self.add_manual, "#685454"))
+        btns.addWidget(self.btn("Limpar", self.limpar))
+        btns.addWidget(self.btn("Apagar", self.apagar_linha))
 
-        botoes_contatos_layout = QHBoxLayout()
-        botoes_contatos_layout.addWidget(self.botao_importar_excel)
-        botoes_contatos_layout.addWidget(self.botao_importar)
-        botoes_contatos_layout.addWidget(self.botao_adicionar_manual)
-        botoes_contatos_layout.addWidget(self.botao_limpar)
-        botoes_contatos_layout.addWidget(self.botao_apagar)
+        left = QVBoxLayout()
+        left.addLayout(btns)
+        left.addWidget(self.tabela)
 
-        contatos_layout = QVBoxLayout()
-        contatos_layout.addLayout(botoes_contatos_layout)
-        contatos_layout.addWidget(self.tabela)
+        # === MENSAGEM ===
+        self.txt_msg = QTextEdit()
+        self.txt_msg.setPlaceholderText("Oi {nome}, tudo bem?")
+        btns_msg = QHBoxLayout()
+        btns_msg.addWidget(self.btn("Nome", self.ins_nome))
+        btns_msg.addWidget(self.btn("Negrito", self.negrito))
+        btns_msg.addWidget(self.btn("Itálico", self.italico))
+        btns_msg.addWidget(self.btn("Emoji", lambda: webbrowser.open("https://emojipedia.org")))
 
-        # Seção Central: Mensagem
-        self.mensagem_label = QLabel("Mensagem (enviada solta)")
-        self.mensagem_texto = QTextEdit()
-        self.mensagem_texto.setPlaceholderText("Digite sua mensagem aqui (ex.: 'Oi {nome}')...")
-        self.mensagem_texto.setMinimumWidth(400)
+        self.tabela_anexos = QTableWidget(0, 3)
+        self.tabela_anexos.setHorizontalHeaderLabels(["Arquivo", "Tipo", "Legenda"])
+        btns_anex = QHBoxLayout()
+        btns_anex.addWidget(self.btn("Nome", self.ins_nome_anex))
+        btns_anex.addWidget(self.btn("Anexar", self.anexar))
+        btns_anex.addWidget(self.btn("Limpar", self.limpar_anexos))
 
-        self.botao_nome = QPushButton("Nome")
-        self.botao_nome.clicked.connect(self.inserir_marcador_nome)
-        self.botao_negrito = QPushButton("Negrito")
-        self.botao_negrito.clicked.connect(self.aplicar_negrito)
-        self.botao_italico = QPushButton("Itálico")
-        self.botao_italico.clicked.connect(self.aplicar_italico)
-        self.botao_emoji = QPushButton("Escolher Emoji")
-        self.botao_emoji.clicked.connect(self.abrir_site_emoji)
+        btns_ctrl = QHBoxLayout()
+        btns_ctrl.addWidget(self.btn("Config", self.config))
+        self.btn_enviar = self.btn("ENVIAR", self.enviar, "green")  # ← AQUI!
+        btns_ctrl.addWidget(self.btn_enviar)
+        self.btn_pausar = self.btn("Pausar", self.pausar)
+        self.btn_parar = self.btn("Parar", self.parar)
+        btns_ctrl.addWidget(self.btn_pausar)
+        btns_ctrl.addWidget(self.btn_parar)
+        self.btn_pausar.setEnabled(False)
+        self.btn_parar.setEnabled(False)
 
-        formatacao_layout = QHBoxLayout()
-        formatacao_layout.addWidget(self.botao_nome)
-        formatacao_layout.addWidget(self.botao_negrito)
-        formatacao_layout.addWidget(self.botao_italico)
-        formatacao_layout.addWidget(self.botao_emoji)
+        center = QVBoxLayout()
+        center.addWidget(QLabel("Mensagem"))
+        center.addWidget(self.txt_msg)
+        center.addLayout(btns_msg)
+        center.addWidget(self.tabela_anexos)
+        center.addLayout(btns_anex)
+        center.addLayout(btns_ctrl)
 
-        self.tabela_anexos = QTableWidget()
-        self.tabela_anexos.setRowCount(0)
-        self.tabela_anexos.setColumnCount(3)
-        self.tabela_anexos.setHorizontalHeaderLabels(["Nome Completo", "Tipo", "Legenda (para anexos)"])
-        self.tabela_anexos.setMinimumHeight(100)
+        # === REGISTROS ===
+        self.tabela_log = QTableWidget(0, 2)
+        self.tabela_log.setHorizontalHeaderLabels(["Número", "Status"])
+        right = QVBoxLayout()
+        right.addWidget(QLabel("Registros"))
+        right.addWidget(self.tabela_log)
+        right.addWidget(self.btn("Limpar Logs", self.limpar_logs))
 
-        self.botao_nome_legenda = QPushButton("Nome")
-        self.botao_nome_legenda.clicked.connect(self.inserir_marcador_nome_legenda)
-        self.botao_anexar = QPushButton("Anexar Arquivos/Imagens")
-        self.botao_anexar.clicked.connect(self.anexar_arquivo)
-        self.botao_limpar_anexos = QPushButton("Limpar")
-        self.botao_limpar_anexos.clicked.connect(self.limpar_anexos)
-
-        anexos_layout = QHBoxLayout()
-        anexos_layout.addWidget(self.botao_nome_legenda)
-        anexos_layout.addWidget(self.botao_anexar)
-        anexos_layout.addWidget(self.botao_limpar_anexos)
-
-        self.botao_config = QPushButton("Configurações")
-        self.botao_config.clicked.connect(self.abrir_configuracoes)
-        self.botao_enviar = QPushButton("Enviar")
-        self.botao_enviar.clicked.connect(self.enviar_mensagens)
-        self.botao_pausar = QPushButton("Pausar")
-        self.botao_pausar.clicked.connect(self.pausar_envio)
-        self.botao_pausar.setEnabled(False)  # Desativado inicialmente
-        self.botao_parar = QPushButton("Parar")
-        self.botao_parar.clicked.connect(self.parar_envio)
-        self.botao_parar.setEnabled(False)  # Desativado inicialmente
-
-        config_enviar_layout = QHBoxLayout()
-        config_enviar_layout.addWidget(self.botao_config)
-        config_enviar_layout.addWidget(self.botao_enviar)
-        config_enviar_layout.addWidget(self.botao_pausar)
-        config_enviar_layout.addWidget(self.botao_parar)
-
-        mensagem_layout = QVBoxLayout()
-        mensagem_layout.addWidget(self.mensagem_label)
-        mensagem_layout.addWidget(self.mensagem_texto)
-        mensagem_layout.addLayout(formatacao_layout)
-        mensagem_layout.addWidget(self.tabela_anexos)
-        mensagem_layout.addLayout(anexos_layout)
-        mensagem_layout.addLayout(config_enviar_layout)
-
-        # Seção Direita: Registros de envio
-        self.registros_label = QLabel("Registros de Envios")
-        self.tabela_registros = QTableWidget()
-        self.tabela_registros.setRowCount(0)
-        self.tabela_registros.setColumnCount(2)
-        self.tabela_registros.setHorizontalHeaderLabels(["Número", "Status"])
-        self.tabela_registros.setMinimumWidth(300)
-
-        self.botao_limpar_registros = QPushButton("Limpar Registros")
-        self.botao_limpar_registros.clicked.connect(self.limpar_registros)
-
-        registros_layout = QVBoxLayout()
-        registros_layout.addWidget(self.registros_label)
-        registros_layout.addWidget(self.tabela_registros)
-        registros_layout.addWidget(self.botao_limpar_registros)
-
-        # Layout principal (horizontal)
-        main_layout = QHBoxLayout()
-        main_layout.addLayout(contatos_layout)  # Esquerda
-        main_layout.addLayout(mensagem_layout)  # Centro
-        main_layout.addLayout(registros_layout)  # Direita
+        # === MAIN LAYOUT ===
+        main = QHBoxLayout()
+        main.addLayout(left, 1)
+        main.addLayout(center, 2)
+        main.addLayout(right, 1)
 
         container = QWidget()
-        container.setLayout(main_layout)
+        container.setLayout(main)
         self.setCentralWidget(container)
 
-        # Variáveis de controle
-        self.delay = 2  # Delay padrão em segundos
-        self.anexos = []  # Lista para armazenar caminhos dos anexos
-        self.sender_thread = None  # Thread de envio
-        self.thread_lock = threading.Lock()  # Lock para proteger acesso a self.sender_thread
+        # === VARIAVEIS ===
+        self.delay = 2
+        self.anexos = []
+        self.driver = None
+        self.thread = None
+        self.lock = threading.Lock()
 
-    def adicionar_linha(self, nome, numero, status="Aguardando"):
-        row_position = self.tabela.rowCount()
-        self.tabela.insertRow(row_position)
-        self.tabela.setItem(row_position, 0, QTableWidgetItem(str(nome)))
-        self.tabela.setItem(row_position, 1, QTableWidgetItem(str(numero)))
-        self.tabela.setItem(row_position, 2, QTableWidgetItem(status))
+    def btn(self, text, func, color=None):
+        b = QPushButton(text)
+        b.clicked.connect(func)
+        if color: b.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold;")
+        return b
 
-    def adicionar_manual(self):
-        dialog = AddContactDialog()
-        if dialog.exec():
-            nome, numero = dialog.get_contact()
-            if numero.startswith("+55"):
-                self.adicionar_linha(nome, numero)
+    # === CONTATOS ===
+    def add_manual(self):
+        d = AddContactDialog()
+        if d.exec():
+            nome, num = d.get_contact()
+            if num.startswith("+55"):
+                self.add_row(nome, num)
             else:
-                QMessageBox.warning(self, "Aviso", "O número deve começar com +55DDD.")
+                QMessageBox.warning(self, "Erro", "Número deve começar com +55")
 
-    def limpar_tabela(self):
-        self.tabela.setRowCount(0)
+    def add_row(self, nome, num, status="Aguardando"):
+        r = self.tabela.rowCount()
+        self.tabela.insertRow(r)
+        self.tabela.setItem(r, 0, QTableWidgetItem(nome))
+        self.tabela.setItem(r, 1, QTableWidgetItem(num))
+        self.tabela.setItem(r, 2, QTableWidgetItem(status))
 
+    def limpar(self): self.tabela.setRowCount(0)
     def apagar_linha(self):
-        selected_row = self.tabela.currentRow()
-        if selected_row >= 0:
-            self.tabela.removeRow(selected_row)
-        else:
-            QMessageBox.warning(self, "Aviso", "Selecione uma linha para apagar.")
+        r = self.tabela.currentRow()
+        if r >= 0: self.tabela.removeRow(r)
 
     def importar_excel(self):
-        dialog = ImportExcelDialog()
-        if dialog.exec():
-            file_path, nome_coluna, numero_coluna = dialog.get_excel_info()
-
-            # Validar entradas
-            if not file_path:
-                QMessageBox.warning(self, "Aviso", "Selecione um arquivo Excel.")
-                return
-            if not numero_coluna:
-                QMessageBox.warning(self, "Aviso", "Especifique o nome da coluna para números.")
-                return
-
+        d = ImportExcelDialog()
+        if d.exec():
+            path, col_n, col_num = d.get_excel_info()
+            if not path or not col_num: return
             try:
-                # Ler o arquivo Excel
-                df = pd.read_excel(file_path)
-
-                # Verificar se a coluna de números especificada existe
-                if numero_coluna not in df.columns:
-                    QMessageBox.critical(self, "Erro", f"A coluna '{numero_coluna}' não foi encontrada no arquivo Excel.")
-                    return
-
-                # Preencher a tabela com os dados do Excel
+                df = pd.read_excel(path)
+                if col_num not in df.columns: raise ValueError("Coluna não encontrada")
                 for _, row in df.iterrows():
-                    # Obter o número
-                    numero = row[numero_coluna]
-                    if pd.notna(numero):
-                        # Obter o nome, se a coluna foi especificada
-                        if nome_coluna and nome_coluna in df.columns:
-                            nome = row[nome_coluna] if pd.notna(row[nome_coluna]) else ""
-                        else:
-                            nome = ""  # Nome vazio se a coluna de nomes não for especificada
-                        self.adicionar_linha(nome, str(numero))
-
+                    num = str(row[col_num])
+                    nome = str(row[col_n]) if col_n and pd.notna(row[col_n]) else ""
+                    if pd.notna(num): self.add_row(nome, num)
             except Exception as e:
-                QMessageBox.critical(self, "Erro ao importar", str(e))
+                QMessageBox.critical(self, "Erro", str(e))
 
-    def importar_contatos(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar arquivo", "", "Arquivos CSV/TXT (*.csv *.txt)")
-        if file_path:
-            try:
-                sep = ";" if file_path.endswith(".txt") else ","
-                df = pd.read_csv(file_path, sep=sep, header=None)
+    def importar_txt(self):
+        path, _ = QFileDialog.getOpenFileName(self, "", "", "TXT/CSV (*.txt *.csv)")
+        if not path: return
+        sep = ";" if path.endswith(".txt") else ","
+        df = pd.read_csv(path, sep=sep, header=None)
+        for _, row in df.iterrows():
+            nome = str(row[0]) if df.shape[1] > 1 else ""
+            num = str(row[1] if df.shape[1] > 1 else row[0])
+            if pd.notna(num): self.add_row(nome, num)
 
-                if df.shape[1] >= 2:
-                    for _, row in df.iterrows():
-                        nome = row[0]
-                        numero = row[1]
-                        if pd.notna(numero):
-                            self.adicionar_linha(nome, numero)
-                else:
-                    for _, row in df.iterrows():
-                        numero = row[0]
-                        if pd.notna(numero):
-                            self.adicionar_linha("", numero)
+    # === FORMATAÇÃO ===
+    def ins_nome(self):
+        self.txt_msg.textCursor().insertText("{nome}")
+    def ins_nome_anex(self):
+        r = self.tabela_anexos.currentRow()
+        if r >= 0:
+            item = self.tabela_anexos.item(r, 2) or QTableWidgetItem("")
+            item.setText(item.text() + "{nome}")
+            self.tabela_anexos.setItem(r, 2, item)
 
-            except Exception as e:
-                QMessageBox.critical(self, "Erro ao importar", str(e))
-
-    def inserir_marcador_nome(self):
-        cursor = self.mensagem_texto.textCursor()
-        cursor.insertText("{nome}")
-        self.mensagem_texto.setTextCursor(cursor)
-
-    def inserir_marcador_nome_legenda(self):
-        selected_row = self.tabela_anexos.currentRow()
-        if selected_row >= 0:
-            legenda_item = self.tabela_anexos.item(selected_row, 2)
-            current_text = legenda_item.text() if legenda_item else ""
-            new_text = current_text + "{nome}"
-            self.tabela_anexos.setItem(selected_row, 2, QTableWidgetItem(new_text))
+    def negrito(self):
+        c = self.txt_msg.textCursor()
+        if c.hasSelection():
+            c.insertText(f"*{c.selectedText()}*")
         else:
-            QMessageBox.warning(self, "Aviso", "Selecione uma linha na tabela de anexos para adicionar o marcador {nome}.")
+            self.txt_msg.insertPlainText("*texto*")
 
-    def aplicar_negrito(self):
-        cursor = self.mensagem_texto.textCursor()
-        if cursor.hasSelection():
-            selected_text = cursor.selectedText()
-            cursor.insertText(f"*{selected_text}*")
+    def italico(self):
+        c = self.txt_msg.textCursor()
+        if c.hasSelection():
+            c.insertText(f"_{c.selectedText()}_")
         else:
-            self.mensagem_texto.insertPlainText("*texto*")
+            self.txt_msg.insertPlainText("_texto_")
 
-    def aplicar_italico(self):
-        cursor = self.mensagem_texto.textCursor()
-        if cursor.hasSelection():
-            selected_text = cursor.selectedText()
-            cursor.insertText(f"_{selected_text}_")
-        else:
-            self.mensagem_texto.insertPlainText("_texto_")
-
-    def abrir_site_emoji(self):
-        webbrowser.open("https://emojipedia.org/")
-
-    def anexar_arquivo(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Selecionar arquivo", 
-            "", 
-            "Imagens/Vídeos/Documentos (*.jpg *.jpeg *.png *.gif *.mp4 *.mov *.avi *.mkv*.pdf *.doc *.docx *.txt *.xls *.xlsx *.ppt *.pptx)"
-        )
-        if file_path:
-            row_position = self.tabela_anexos.rowCount()
-            self.tabela_anexos.insertRow(row_position)
-            self.tabela_anexos.setItem(row_position, 0, QTableWidgetItem(file_path))
-            self.tabela_anexos.setItem(row_position, 1, QTableWidgetItem("Arquivo"))
-            self.tabela_anexos.setItem(row_position, 2, QTableWidgetItem(""))
-            self.anexos.append(file_path)
+    # === ANEXOS ===
+    def anexar(self):
+        path, _ = QFileDialog.getOpenFileName(self, "", "", "Todos (*.*)")
+        if path:
+            r = self.tabela_anexos.rowCount()
+            self.tabela_anexos.insertRow(r)
+            self.tabela_anexos.setItem(r, 0, QTableWidgetItem(path))
+            self.tabela_anexos.setItem(r, 1, QTableWidgetItem("Arquivo"))
+            self.tabela_anexos.setItem(r, 2, QTableWidgetItem(""))
+            self.anexos.append(path)
 
     def limpar_anexos(self):
         self.tabela_anexos.setRowCount(0)
         self.anexos.clear()
 
-    def abrir_configuracoes(self):
-        dialog = ConfigDialog()
-        if dialog.exec():
-            self.delay = dialog.get_delay()
+    # === CONTROLE ===
+    def config(self):
+        d = ConfigDialog()
+        if d.exec(): self.delay = d.get_delay()
 
-    def pausar_envio(self):
-        with self.thread_lock:
-            if self.sender_thread and self.sender_thread.isRunning():
-                self.sender_thread.pausar()
-            else:
-                print("Pausar: Thread não está em execução ou não existe.")
+    def iniciar_driver(self):
+        if hasattr(self, 'driver') and self.driver:
+            return True
+        path = './chromedriver/chromedriver.exe'
+        if not os.path.exists(path):
+            QMessageBox.critical(self, "Erro", "chromedriver.exe não encontrado!")
+            return False
+        service = Service(path)
+        opts = Options()
+        opts.add_argument('--disable-gcm')
+        opts.add_argument('--log-level=3')
+        opts.add_argument('--no-sandbox')
+        try:
+            self.driver = webdriver.Chrome(service=service, options=opts)
+            self.driver.get("https://web.whatsapp.com")
+            print("[INFO] Escaneie o QR Code...")
+            WebDriverWait(self.driver, 60).until(EC.presence_of_element_located((By.ID, "side")))
+            print("[OK] WhatsApp conectado!")
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao iniciar: {e}")
+            return False
 
-    def parar_envio(self):
-        with self.thread_lock:
-            # Fechar o navegador para interromper o envio
-            if hasattr(self, 'driver'):
-                try:
-                    self.driver.quit()
-                except Exception as e:
-                    print(f"Erro ao fechar o navegador: {e}")
-                finally:
-                    delattr(self, 'driver')  # Remove a referência ao driver
-
-            # Garantir que a thread seja parada e finalizada
-            if self.sender_thread and self.sender_thread.isRunning():
-                self.sender_thread.parar()
-                self.sender_thread.wait()  # Aguarda a thread terminar
-
-            # Resetar o estado da interface
-            self.botao_enviar.setEnabled(True)
-            self.botao_pausar.setEnabled(False)
-            self.botao_parar.setEnabled(False)
-            self.botao_pausar.setText("Pausar")
-            self.sender_thread = None
-
-    def atualizar_texto_pausar(self, pausado):
-        self.botao_pausar.setText("Retomar" if pausado else "Pausar")
-
-    def enviar_mensagens(self):
-        if not hasattr(self, 'driver'):
-            # Configuração inicial do Selenium
-            chromedriver_path = './chromedriver.exe'
-            service = Service(chromedriver_path)
-            self.driver = webdriver.Chrome(service=service)
-            self.driver.get("https://web.whatsapp.com/")
-            wait = WebDriverWait(self.driver, 20)  # Aumentar o tempo de espera para lidar com o comunicado
-
-            # Tentar clicar no botão "Continuar" do comunicado, se presente
-            try:
-                botao_continuar = wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@id="'app'"]/div/span[2]/div/div/div/div/div/div/div[2]/div/button/div/div")))
-                botao_continuar.click()
-                time.sleep(2)  # Esperar após clicar para garantir que a página carregue
-            except:
-                pass  # Ignorar se o botão não estiver presente (caso o comunicado já tenha sido fechado)
-
-            # Aguardar a página principal carregar
-            while len(self.driver.find_elements(By.ID, 'side')) < 1:
-                time.sleep(1)
-            time.sleep(2)
-
-        mensagem = self.mensagem_texto.toPlainText()
-        if not mensagem and not self.anexos:
-            QMessageBox.warning(self, "Aviso", "Digite uma mensagem ou anexe um arquivo para enviar.")
-            return
-
+    def enviar(self):
         if self.tabela.rowCount() == 0:
-            QMessageBox.warning(self, "Aviso", "Importe números para enviar mensagens.")
+            QMessageBox.warning(self, "Aviso", "Adicione contatos")
+            return
+        if not self.txt_msg.toPlainText() and not self.anexos:
+            QMessageBox.warning(self, "Aviso", "Digite mensagem ou anexe")
             return
 
-        # Desativar o botão "Enviar" e ativar "Pausar" e "Parar"
-        self.botao_enviar.setEnabled(False)
-        self.botao_pausar.setEnabled(True)
-        self.botao_parar.setEnabled(True)
+        if not self.iniciar_driver():
+            return
 
-        # Iniciar a thread de envio
-        with self.thread_lock:
-            self.sender_thread = SenderThread(
-                self.driver, mensagem, self.anexos, self.tabela, self.tabela_anexos, self.delay, self
+        self.btn_enviar.setEnabled(False)  # ← CORRIGIDO
+        self.btn_pausar.setEnabled(True)
+        self.btn_parar.setEnabled(True)
+
+        with self.lock:
+            self.thread = SenderThread(
+                self.driver,
+                self.txt_msg.toPlainText(),
+                self.anexos,
+                self.tabela,
+                self.tabela_anexos,
+                self.delay
             )
-            self.sender_thread.update_status.connect(self.atualizar_status)
-            self.sender_thread.add_log.connect(self.adicionar_registro)
-            self.sender_thread.finished.connect(self.envio_finalizado)
-            self.sender_thread.update_pause_button.connect(self.atualizar_texto_pausar)
-            self.sender_thread.start()
+            self.thread.update_status.connect(lambda r, s: self.tabela.setItem(r, 2, QTableWidgetItem(s)))
+            self.thread.add_log.connect(lambda n, s: self.add_log(n, s))
+            self.thread.finished.connect(self.finalizado)
+            self.thread.update_pause.connect(lambda p: self.btn_pausar.setText("Retomar" if p else "Pausar"))
+            self.thread.start()
 
-    def atualizar_status(self, row, status):
-        self.tabela.setItem(row, 2, QTableWidgetItem(status))
+    def pausar(self):
+        with self.lock:
+            if self.thread: self.thread.pausar()
 
-    def adicionar_registro(self, numero, status):
-        row_position = self.tabela_registros.rowCount()
-        self.tabela_registros.insertRow(row_position)
-        self.tabela_registros.setItem(row_position, 0, QTableWidgetItem(numero))
-        self.tabela_registros.setItem(row_position, 1, QTableWidgetItem(status))
-
-    def envio_finalizado(self):
-        with self.thread_lock:
-            self.botao_enviar.setEnabled(True)
-            self.botao_pausar.setEnabled(False)
-            self.botao_parar.setEnabled(False)
-            self.botao_pausar.setText("Pausar")
-            self.sender_thread = None
-
-    def limpar_registros(self):
-        self.tabela_registros.setRowCount(0)
-
-    def closeEvent(self, event):
-        reply = QMessageBox.question(self, 'Confirmação', "Tem certeza que deseja fechar o sistema? Isso fechará o navegador também.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            with self.thread_lock:
-                if self.sender_thread and self.sender_thread.isRunning():
-                    self.sender_thread.parar()
-                    self.sender_thread.wait()  # Aguarda a thread terminar
+    def parar(self):
+        with self.lock:
+            if self.thread: self.thread.parar()
             if hasattr(self, 'driver'):
-                self.driver.quit()
-                delattr(self, 'driver')  # Remove a referência ao driver
-            event.accept()
+                try: self.driver.quit()
+                except: pass
+                finally: delattr(self, 'driver')
+        self.finalizado()
+
+    def finalizado(self):
+        self.btn_enviar.setEnabled(True)  # ← CORRIGIDO
+        self.btn_pausar.setEnabled(False)
+        self.btn_parar.setEnabled(False)
+        self.btn_pausar.setText("Pausar")
+
+    def add_log(self, num, status):
+        r = self.tabela_log.rowCount()
+        self.tabela_log.insertRow(r)
+        self.tabela_log.setItem(r, 0, QTableWidgetItem(num))
+        self.tabela_log.setItem(r, 1, QTableWidgetItem(status))
+
+    def limpar_logs(self):
+        self.tabela_log.setRowCount(0)
+
+    def closeEvent(self, e):
+        if QMessageBox.question(self, "Sair", "Fechar o app?") == QMessageBox.Yes:
+            self.parar()
+            e.accept()
         else:
-            event.ignore()
+            e.ignore()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
+    win = MainWindow()
+    win.show()
     sys.exit(app.exec())
