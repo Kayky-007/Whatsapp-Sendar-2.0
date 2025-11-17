@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QFileDialog, QMessageBox,
-    QTextEdit, QLineEdit, QDialog, QFormLayout, QLabel
+    QTextEdit, QLineEdit, QDialog, QFormLayout, QLabel, QProgressBar
 )
 from PySide6.QtCore import Qt, QThread, Signal
 import sys
@@ -17,6 +17,33 @@ import time
 import os
 import webbrowser
 import threading
+
+# ============================= ESTILOS =============================
+DARK_STYLESHEET = """
+QMainWindow, QWidget { background-color: #1e1e1e; color: #ffffff; }
+QPushButton { background-color: #2d2d2d; color: #ffffff; border: 1px solid #444; padding: 6px; font-weight: bold; border-radius: 6px; }
+QPushButton:hover { background-color: #3d3d3d; }
+QPushButton:disabled { background-color: #252525; color: #666; }
+QTableWidget { background-color: #252525; gridline-color: #333; color: #ddd; }
+QHeaderView::section { background-color: #2d2d2d; color: #fff; padding: 4px; border: 1px solid #444; }
+QTextEdit, QLineEdit { background-color: #2d2d2d; color: #fff; border: 1px solid #444; }
+QLabel { color: #ccc; }
+QProgressBar { border: 1px solid #444; text-align: center; background: #252525; }
+QProgressBar::chunk { background-color: #0a0; }
+"""
+
+LIGHT_STYLESHEET = """
+QMainWindow, QWidget { background-color: #f5f5f5; color: #000000; }
+QPushButton { background-color: #e0e0e0; color: #000; border: 1px solid #ccc; padding: 6px; font-weight: bold; border-radius: 6px; }
+QPushButton:hover { background-color: #d0d0d0; }
+QPushButton:disabled { background-color: #f0f0f0; color: #888; }
+QTableWidget { background-color: #ffffff; gridline-color: #ddd; color: #000; }
+QHeaderView::section { background-color: #f0f0f0; color: #000; padding: 4px; border: 1px solid #ccc; }
+QTextEdit, QLineEdit { background-color: #ffffff; color: #000; border: 1px solid #ccc; }
+QLabel { color: #333; }
+QProgressBar { border: 1px solid #ccc; text-align: center; background: #f0f0f0; }
+QProgressBar::chunk { background-color: #0a0; }
+"""
 
 # ============================= DIALOGS =============================
 class ConfigDialog(QDialog):
@@ -87,6 +114,7 @@ class SenderThread(QThread):
     add_log = Signal(str, str)
     finished = Signal()
     update_pause = Signal(bool)
+    progress = Signal(int, int)  # atual, total
 
     def __init__(self, driver, msg, anexos, tabela, tabela_anexos, delay):
         super().__init__()
@@ -101,7 +129,8 @@ class SenderThread(QThread):
         self.lock = threading.Lock()
 
     def run(self):
-        for row in range(self.tabela.rowCount()):
+        total = self.tabela.rowCount()
+        for row in range(total):
             with self.lock:
                 if self.parar: break
 
@@ -135,6 +164,7 @@ class SenderThread(QThread):
 
             self.update_status.emit(row, status.strip())
             self.add_log.emit(numero, status.strip())
+            self.progress.emit(row + 1, total)  # ATUALIZA PROGRESSO
 
         self.finished.emit()
 
@@ -148,7 +178,6 @@ class SenderThread(QThread):
                 self.driver.get(url)
                 wait.until(EC.presence_of_element_located((By.ID, "main")))
                 time.sleep(3)
-
                 xpath = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[4]/div/span/div/div/div[1]/div[1]/span'
                 btn = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
                 btn.click()
@@ -164,13 +193,11 @@ class SenderThread(QThread):
                 wait.until(EC.presence_of_element_located((By.ID, "main")))
                 time.sleep(3)
 
-                # === BOTÃO "+" ===
                 xpath_plus = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/div/span/div/div/div[1]/div[1]/span'
                 btn_plus = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_plus)))
                 btn_plus.click()
                 time.sleep(1)
 
-                # === INPUT DO ARQUIVO ===
                 ext = os.path.splitext(arquivo)[1].lower()
                 input_xpath = (
                     '//*[@id="app"]/div[1]/div/span[6]/div/ul/div/div/div[2]/li/div/input'
@@ -181,12 +208,11 @@ class SenderThread(QThread):
                 campo.send_keys(arquivo)
                 time.sleep(3)
 
-                # === BOTÃO ENVIAR DO POP-UP (SEU XPATH NOVO) ===
                 xpath_send_anexo = '//*[@id="app"]/div[1]/div/div[3]/div/div[3]/div[2]/div/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span'
                 btn_send_anexo = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_send_anexo)))
                 btn_send_anexo.click()
                 time.sleep(self.delay)
-                print(f"[OK] Anexo enviado com legenda: {numero}")
+                print(f"[OK] Anexo enviado: {numero}")
                 return "Arquivo OK"
 
         except Exception as e:
@@ -209,7 +235,16 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("WhatsApp Sender - KAYKY EDITION")
-        self.setGeometry(100, 100, 1300, 700)
+        self.setGeometry(100, 100, 1400, 700)
+        self.setStyleSheet(DARK_STYLESHEET)
+        self.tema_escuro = True
+
+        # === PROGRESSO ===
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
 
         # === TABELA CONTATOS ===
         self.tabela = QTableWidget(0, 3)
@@ -245,7 +280,7 @@ class MainWindow(QMainWindow):
 
         btns_ctrl = QHBoxLayout()
         btns_ctrl.addWidget(self.btn("Config", self.config))
-        self.btn_enviar = self.btn("ENVIAR", self.enviar, "green")  # ← AQUI!
+        self.btn_enviar = self.btn("ENVIAR", self.enviar, "green")
         btns_ctrl.addWidget(self.btn_enviar)
         self.btn_pausar = self.btn("Pausar", self.pausar)
         self.btn_parar = self.btn("Parar", self.parar)
@@ -253,6 +288,8 @@ class MainWindow(QMainWindow):
         btns_ctrl.addWidget(self.btn_parar)
         self.btn_pausar.setEnabled(False)
         self.btn_parar.setEnabled(False)
+        self.btn_tema = self.btn("Tema Claro", self.trocar_tema, "#333")
+        btns_ctrl.addWidget(self.btn_tema)
 
         center = QVBoxLayout()
         center.addWidget(QLabel("Mensagem"))
@@ -261,6 +298,8 @@ class MainWindow(QMainWindow):
         center.addWidget(self.tabela_anexos)
         center.addLayout(btns_anex)
         center.addLayout(btns_ctrl)
+        center.addWidget(QLabel("Progresso:"))
+        center.addWidget(self.progress_bar)
 
         # === REGISTROS ===
         self.tabela_log = QTableWidget(0, 2)
@@ -290,8 +329,21 @@ class MainWindow(QMainWindow):
     def btn(self, text, func, color=None):
         b = QPushButton(text)
         b.clicked.connect(func)
-        if color: b.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold;")
+        if color: b.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px;")
         return b
+
+    # === TEMA ===
+    def trocar_tema(self):
+        self.tema_escuro = not self.tema_escuro
+        self.setStyleSheet(DARK_STYLESHEET if self.tema_escuro else LIGHT_STYLESHEET)
+        self.btn_tema.setText("Tema Claro" if self.tema_escuro else "Tema Escuro")
+
+    # === PROGRESSO ===
+    def atualizar_progresso(self, atual, total):
+        if total > 0:
+            percent = int((atual / total) * 100)
+            self.progress_bar.setValue(percent)
+            self.progress_bar.setFormat(f"Enviando... {atual}/{total} ({percent}%)")
 
     # === CONTATOS ===
     def add_manual(self):
@@ -387,7 +439,7 @@ class MainWindow(QMainWindow):
     def iniciar_driver(self):
         if hasattr(self, 'driver') and self.driver:
             return True
-        path = './chromedriver/chromedriver.exe'
+        path = './chromedriver.exe'
         if not os.path.exists(path):
             QMessageBox.critical(self, "Erro", "chromedriver.exe não encontrado!")
             return False
@@ -418,9 +470,10 @@ class MainWindow(QMainWindow):
         if not self.iniciar_driver():
             return
 
-        self.btn_enviar.setEnabled(False)  # ← CORRIGIDO
+        self.btn_enviar.setEnabled(False)
         self.btn_pausar.setEnabled(True)
         self.btn_parar.setEnabled(True)
+        self.progress_bar.setValue(0)
 
         with self.lock:
             self.thread = SenderThread(
@@ -435,6 +488,7 @@ class MainWindow(QMainWindow):
             self.thread.add_log.connect(lambda n, s: self.add_log(n, s))
             self.thread.finished.connect(self.finalizado)
             self.thread.update_pause.connect(lambda p: self.btn_pausar.setText("Retomar" if p else "Pausar"))
+            self.thread.progress.connect(self.atualizar_progresso)
             self.thread.start()
 
     def pausar(self):
@@ -451,10 +505,12 @@ class MainWindow(QMainWindow):
         self.finalizado()
 
     def finalizado(self):
-        self.btn_enviar.setEnabled(True)  # ← CORRIGIDO
+        self.btn_enviar.setEnabled(True)
         self.btn_pausar.setEnabled(False)
         self.btn_parar.setEnabled(False)
         self.btn_pausar.setText("Pausar")
+        self.progress_bar.setValue(100)
+        self.progress_bar.setFormat("Concluído!")
 
     def add_log(self, num, status):
         r = self.tabela_log.rowCount()
