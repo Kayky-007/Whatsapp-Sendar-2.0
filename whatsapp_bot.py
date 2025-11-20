@@ -6,7 +6,7 @@ import time
 import os     
 
 # Configuração inicial do Selenium
-chromedriver_path = './chromedriver/chromedriver.exe'
+chromedriver_path = './chromedriver.exe'
 service = Service(chromedriver_path)
 driver = webdriver.Chrome(service=service)
 
@@ -44,7 +44,7 @@ def enviar_mensagem_por_numero(numero, mensagem, arquivo=None, legenda=None):
 
         if arquivo:
             # Clica no botão de anexar
-            botao_anexar = driver.find_element(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/div/span/div/div/div[1]/div[1]/span[1]') # antigo //*[@id="main"]/footer/div[1]/div/span/div/div[1]/div/button/span
+            botao_anexar = driver.find_element(By.XPATH, '//span[@data-icon="plus-rounded"]') # antigo //*[@id="main"]/footer/div[1]/div/span/div/div[1]/div/button/span
             botao_anexar.click()
             time.sleep(1)
 
@@ -61,13 +61,13 @@ def enviar_mensagem_por_numero(numero, mensagem, arquivo=None, legenda=None):
                 time.sleep(2)
 
             # Clica no botão de enviar
-            botao_enviar = driver.find_element(By.XPATH, '//*[@id="app"]/div/div[3]/div/div[2]/div[2]/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span')
+            botao_enviar = driver.find_element(By.XPATH, '//span[@data-icon="wds-ic-send-filled"][1]')
             botao_enviar.click()
             print(f"Arquivo e legenda enviados para {numero}")
         
         elif mensagem:
             # Clica no botão de enviar mensagem
-            botao_enviar_mensagem = driver.find_element(By.XPATH, "//*[@id='main']/footer/div[1]/div/span/div/div[2]/div/div[4]/div/span/div/div/div[1]/div[1]/span") #//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div[2]/button/span xpath versão antiga
+            botao_enviar_mensagem = driver.find_element(By.XPATH, "//span[@data-icon='wds-ic-send-filled' and not(ancestor::div[contains(@style,'display: none')]) ]") #//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div[2]/button/span xpath versão antiga
             botao_enviar_mensagem.click()
             print(f"Mensagem enviada para {numero}: {mensagem}")
 

@@ -178,7 +178,7 @@ class SenderThread(QThread):
                 self.driver.get(url)
                 wait.until(EC.presence_of_element_located((By.ID, "main")))
                 time.sleep(3)
-                xpath = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[4]/div/span/div/div/div[1]/div[1]/span'
+                xpath = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[4]/div/span/button/div/div/div[1]/span'
                 btn = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
                 btn.click()
                 print(f"[OK] Texto: {numero}")
@@ -193,22 +193,22 @@ class SenderThread(QThread):
                 wait.until(EC.presence_of_element_located((By.ID, "main")))
                 time.sleep(3)
 
-                xpath_plus = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/div/span/div/div/div[1]/div[1]/span'
+                xpath_plus = '//*[@id="main"]/footer/div[1]/div/span/div/div[2]/div/div[1]/div/span/button/div/div/div[1]/span'
                 btn_plus = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_plus)))
                 btn_plus.click()
                 time.sleep(1)
 
                 ext = os.path.splitext(arquivo)[1].lower()
                 input_xpath = (
-                    '//*[@id="app"]/div[1]/div/span[6]/div/ul/div/div/div[2]/li/div/input'
+                    '//*[@id="app"]/div/div/span[6]/div/ul/div/div/div[2]/li/div/input'
                     if ext in {'.jpg','.jpeg','.png','.gif','.mp4','.mov'}
-                    else '//*[@id="app"]/div[1]/div/span[6]/div/ul/div/div/div[1]/li/div/input'
+                    else '//*[@id="app"]/div/div/span[6]/div/ul/div/div/div[1]/li/div/input'
                 )
                 campo = wait.until(EC.presence_of_element_located((By.XPATH, input_xpath)))
                 campo.send_keys(arquivo)
                 time.sleep(3)
 
-                xpath_send_anexo = '//*[@id="app"]/div[1]/div/div[3]/div/div[3]/div[2]/div/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span'
+                xpath_send_anexo = '//*[@id="app"]/div/div/div[3]/div/div[3]/div[2]/div/span/div/div/div/div[2]/div/div[2]/div[2]/div/div/span'
                 btn_send_anexo = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_send_anexo)))
                 btn_send_anexo.click()
                 time.sleep(self.delay)
