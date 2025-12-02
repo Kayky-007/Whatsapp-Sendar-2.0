@@ -371,14 +371,26 @@ class MainWindow(QMainWindow):
         d = ImportExcelDialog()
         if d.exec():
             path, col_n, col_num = d.get_excel_info()
-            if not path or not col_num: return
+            if not path or not col_num:
+                return
             try:
                 df = pd.read_excel(path)
-                if col_num not in df.columns: raise ValueError("Coluna não encontrada")
+                if col_num not in df.columns:
+                    raise ValueError("Coluna de número não encontrada")
+
                 for _, row in df.iterrows():
-                    num = str(row[col_num])
+                    num_raw = row[col_num]
                     nome = str(row[col_n]) if col_n and pd.notna(row[col_n]) else ""
-                    if pd.notna(num): self.add_row(nome, num)
+
+                    if pd.notna(num_raw):
+                        num = str(int(float(num_raw)))
+                    else:
+                        num = ""
+
+                    if num:
+                        self.add_row(nome, num)
+                        
+                print(f"[OK] {len(df)} contatos importados do Excel")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", str(e))
 
