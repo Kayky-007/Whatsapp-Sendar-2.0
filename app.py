@@ -370,30 +370,52 @@ class MainWindow(QMainWindow):
     def importar_excel(self):
         d = ImportExcelDialog()
         if d.exec():
-            path, col_n, col_num = d.get_excel_info()
-            if not path or not col_num:
+            caminho, coluna_nome, coluna_numero = d.get_excel_info()
+            if not caminho or not coluna_numero:
                 return
             try:
-                df = pd.read_excel(path)
-                if col_num not in df.columns:
-                    raise ValueError("Coluna de número não encontrada")
+                df = pd.read_excel(caminho)
 
-                for _, row in df.iterrows():
-                    num_raw = row[col_num]
-                    nome = str(row[col_n]) if col_n and pd.notna(row[col_n]) else ""
+                if coluna_numero not in df.columns:
+                    raise ValueError(f"Coluna '{coluna_numero}' não encontrada")
 
-                    if pd.notna(num_raw):
-                        num = str(int(float(num_raw)))
+                for _, linha in df.iterrows():
+                    numero_bruto = str(linha[coluna_numero])
+                    nome = str(linha[coluna_nome]) if coluna_nome and pd.notna(linha[coluna_nome]) else ""
+
+                    # === LIMPA O NÚMERO: remove tudo que não é dígito ===
+                    numero_limpo = ''.join(filter(str.isdigit, numero_bruto))
+
+                    # Se tiver 11 dígitos → DDD + número (Brasil)
+                    if len(numero_limpo) == 11:
+                        numero_final = numero_limpo
+                    # Se tiver 10 → número sem DDD (ex: 3233-4543 vira 32334543)
+                    elif len(numero_limpo) == 10:
+                        numero_final = numero_limpo
+                    # Se tiver 9 → celular sem DDD (ex: 98888-7777)
+                    elif len(numero_limpo) == 9:
+                        numero_final = numero_limpo
+                    # Se tiver menos que 9 → inválido
+                    elif len(numero_limpo) < 9:
+                        print(f"[AVISO] Número muito curto ignorado: {numero_bruto}")
+                        continue
+                    # Se tiver mais que 11 → remove o 55 do começo se existir
                     else:
-                        num = ""
+                        if numero_limpo.startswith("55"):
+                            numero_final = numero_limpo[2:]  # remove 55
+                        else:
+                            numero_final = numero_limpo[-11:]  # pega os últimos 11 dígitos
 
-                    if num:
-                        self.add_row(nome, num)
-                        
-                print(f"[OK] {len(df)} contatos importados do Excel")
+                    # === GARANTE QUE É SÓ NÚMERO ===
+                    if numero_final.isdigit() and len(numero_final) >= 9:
+                        self.add_row(nome.strip(), numero_final)
+                    else:
+                        print(f"[AVISO] Número inválido ignorado: {numero_bruto}")
+
+                print(f"[OK] {len(df)} linhas processadas do Excel")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", str(e))
-
+                
     def importar_txt(self):
         path, _ = QFileDialog.getOpenFileName(self, "", "", "TXT/CSV (*.txt *.csv)")
         if not path: return
