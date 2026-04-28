@@ -1,0 +1,7 @@
+PySide6
+pandas
+selenium
+pyperclip
+pywin32
+pyautogui
+opencv-python

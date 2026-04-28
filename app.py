@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QFileDialog, QMessageBox,
     QTextEdit, QLineEdit, QDialog, QFormLayout, QLabel, QProgressBar, QDialogButtonBox, QSpinBox, QRadioButton, QButtonGroup,
-    QFrame, QDateTimeEdit, QTimeEdit, QDialogButtonBox
+    QFrame, QDateTimeEdit, QTimeEdit, QDialogButtonBox, QSizePolicy
 )
 from PySide6.QtWidgets import QHeaderView
 from PySide6.QtCore import QThread, QTimer, QDateTime, QTime, Signal, Qt, QObject
@@ -21,6 +21,7 @@ import os
 import sys
 from datetime import datetime
 import random
+import cv2
 import webbrowser
 import threading
 import pyperclip
@@ -1162,6 +1163,9 @@ class BarraAgendamento(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
+        # Na classe BarraAgendamento, no __init__:
+        self.setFixedHeight(44)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # Ícone pulsante
         self.lbl_icone = QLabel("🕐")
@@ -2011,6 +2015,8 @@ class SenderThread(QThread):
         btn.click()
 
     def _enviar_arquivo(self, numero, arquivo, legenda, recarregar=True):
+        import pyperclip
+        import pyautogui
 
         wait = WebDriverWait(self.driver, 15)
 
@@ -2019,7 +2025,7 @@ class SenderThread(QThread):
             wait.until(EC.presence_of_element_located((By.ID, "main")))
             time.sleep(3)
 
-        # ── Restaura Chrome antes de qualquer interação ──
+        # ── Restaura Chrome UMA vez antes de interagir ──
         self._focar_chrome()
 
         # ── Clica no botão + via JS ──
@@ -2028,6 +2034,7 @@ class SenderThread(QThread):
         ))
         self._clicar_elemento(btn_plus)
         time.sleep(1.2)
+
         # ── Clica no item do menu via JS ──
         ext = os.path.splitext(arquivo)[1].lower()
         is_media = ext in {'.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.avi', '.webp'}
@@ -2035,12 +2042,11 @@ class SenderThread(QThread):
         item = wait.until(EC.presence_of_element_located((By.XPATH, xpath_menu)))
         self._clicar_elemento(item)
         print(f"[INFO] Clicou em '{'Fotos e vídeos' if is_media else 'Documento'}'")
-        time.sleep(2.0)
 
-        # ── Restaura Chrome para o pyautogui funcionar ──
-        self._focar_chrome()
-        time.sleep(1.0)
+        # ── Aguarda o explorer abrir — SEM chamar _focar_chrome aqui ──
+        time.sleep(3.0)
 
+        # ── Cola o caminho ──
         arquivo_abs = os.path.abspath(arquivo)
         pyperclip.copy(arquivo_abs)
         pyautogui.hotkey('ctrl', 'a')
@@ -2088,7 +2094,6 @@ class SenderThread(QThread):
         ))
         self._clicar_elemento(btn_send)
         print(f"[OK] Arquivo enviado: {numero}")
-
 
     def pausar(self):
         with self.lock:
@@ -2218,7 +2223,7 @@ class MainWindow(QMainWindow):
         btns_ctrl.addWidget(self.btn_tema)
 
         center = QVBoxLayout()
-        center.addWidget(self.barra_agendamento)
+        center.addWidget(self.barra_agendamento)  # altura fixa de 44px
         center.addWidget(QLabel("Mensagem"))
         center.addWidget(self.txt_msg)
         center.addLayout(btns_msg)
@@ -2241,9 +2246,9 @@ class MainWindow(QMainWindow):
 
         # === MAIN LAYOUT ===
         main = QHBoxLayout()
-        main.addLayout(left, 1)
-        main.addLayout(center, 2)
-        main.addLayout(right, 1)
+        main.addLayout(left, 2)   # contatos — proporção menor
+        main.addLayout(center, 3) # mensagem — proporção maior
+        main.addLayout(right, 2)  # logs — proporção maior
 
 
         # No topo do main layout, antes do container principal
@@ -2633,7 +2638,7 @@ class MainWindow(QMainWindow):
         elif ext in {'.mp4', '.mov', '.avi', '.mkv', '.webm'}:
             # ── Vídeo: tenta extrair primeiro frame ──
             try:
-                import cv2
+                
                 cap = cv2.VideoCapture(path)
                 ret, frame = cap.read()
                 cap.release()
