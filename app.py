@@ -2223,7 +2223,6 @@ class MainWindow(QMainWindow):
         btns_ctrl.addWidget(self.btn_tema)
 
         center = QVBoxLayout()
-        center.addWidget(self.barra_agendamento)  # altura fixa de 44px
         center.addWidget(QLabel("Mensagem"))
         center.addWidget(self.txt_msg)
         center.addLayout(btns_msg)
@@ -2244,22 +2243,24 @@ class MainWindow(QMainWindow):
         right.addWidget(self.tabela_log)
         right.addWidget(self.btn("Limpar Logs", self.limpar_logs))
 
-        # === MAIN LAYOUT ===
-        main = QHBoxLayout()
-        main.addLayout(left, 2)   # contatos — proporção menor
-        main.addLayout(center, 3) # mensagem — proporção maior
-        main.addLayout(right, 2)  # logs — proporção maior
 
-
-        # No topo do main layout, antes do container principal
         topo = QHBoxLayout()
+        topo.addWidget(self.barra_agendamento)  # ocupa o espaço todo
         topo.addStretch()
         topo.addWidget(self.led_status)
 
+        # ── Main layout ──
+        main = QHBoxLayout()
+        main.addLayout(left, 2)
+        main.addLayout(center, 3)
+        main.addLayout(right, 2)
+
+        # ── Vertical: topo + main ──
         main_vertical = QVBoxLayout()
         main_vertical.setContentsMargins(0, 4, 8, 0)
+        main_vertical.setSpacing(4)
         main_vertical.addLayout(topo)
-        main_vertical.addLayout(main)  # seu layout principal existente
+        main_vertical.addLayout(main)
 
         container = QWidget()
         container.setLayout(main_vertical)
